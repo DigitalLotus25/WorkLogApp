@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lotus Hyundai - WorkLogApp</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Tailwind custom colors (Hyundai-ish primary palette)
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: {
+              DEFAULT: '#00205B',
+              50: '#e9eef9',
+              100: '#cfdaf6',
+              200: '#9bb1ee',
+              300: '#6788e6',
+              400: '#355fe0',
+              500: '#00205B'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <!-- Firebase (compat build for single-file ease) -->
+  <script src="https://www.gstatic.com/firebasejs/12.5.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/12.5.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/12.5.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/12.5.0/firebase-app.js"></script>
+  <style> /* small scrollbar style */
+    ::-webkit-scrollbar{height:10px;width:10px}
+    ::-webkit-scrollbar-thumb{background:linear-gradient(180deg,#94a3b8,#cbd5e1);border-radius:999px}
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans">
+  <div class="max-w-6xl mx-auto p-6">
+    <header class="flex items-center justify-between mb-6">
+      <div class="flex items-center gap-3">
+        <div class="w-12 h-12 rounded-lg bg-primary flex items-center justify-center text-white font-bold">📝</div>
+        <div>
+          <h1 class="text-2xl font-semibold">Lotus Hyundai - WorkLog</h1>
+          <p class="text-sm text-gray-500">Simple work recording & admin dashboard</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <div id="userEmail" class="text-sm text-gray-600"></div>
+        <button id="logoutBtn" class="hidden bg-primary text-white px-3 py-2 rounded-md">Logout</button>
+      </div>
+    </header>
+
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <!-- left: nav -->
+      <aside class="md:col-span-1 bg-white p-4 rounded-lg shadow-sm">
+        <div class="space-y-2">
+          <button data-tab="dashboard" class="tab-btn w-full text-left px-3 py-2 rounded hover:bg-gray-50">Dashboard</button>
+          <button data-tab="mytasks" class="tab-btn w-full text-left px-3 py-2 rounded hover:bg-gray-50">My Tasks</button>
+          <button data-tab="add" class="tab-btn w-full text-left px-3 py-2 rounded hover:bg-gray-50">Add Task</button>
+          <button data-tab="users" class="tab-btn w-full text-left px-3 py-2 rounded hover:bg-gray-50 hidden" id="usersNav">Users (Admin)</button>
+          <button data-tab="alltasks" class="tab-btn w-full text-left px-3 py-2 rounded hover:bg-gray-50 hidden" id="allTasksNav">All Tasks (Admin)</button>
+        </div>
+        <hr class="my-4">
+        <div id="authArea">
+          <h3 class="text-sm font-medium text-gray-700">Sign up / Sign in</h3>
+          <p class="text-xs text-gray-500">Email/password auth (Firebase)</p>
+          <div class="mt-3 space-y-2">
+            <input id="email" type="email" placeholder="Email" class="w-full px-3 py-2 border rounded" />
+            <input id="password" type="password" placeholder="Password" class="w-full px-3 py-2 border rounded" />
+            <div class="flex gap-2">
+              <button id="signup" class="flex-1 bg-primary text-white px-3 py-2 rounded">Sign up</button>
+              <button id="login" class="flex-1 bg-white border px-3 py-2 rounded">Login</button>
+            </div>
+            <p class="text-xs text-gray-500">* To create an admin, sign up normally then an existing admin can promote the user.</p>
+          </div>
+        </div>
+      </aside>
+
+      <!-- right: content -->
+      <main class="md:col-span-3 space-y-6">
+        <!-- Dashboard -->
+        <section id="dashboard" class="panel bg-white p-6 rounded-lg shadow-sm hidden">
+          <h2 class="text-lg font-semibold mb-4">Dashboard</h2>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="p-4 rounded-lg border">
+              <h3 class="text-sm text-gray-500">Your Tasks</h3>
+              <div id="countMyTasks" class="text-2xl font-bold">0</div>
+            </div>
+            <div class="p-4 rounded-lg border">
+              <h3 class="text-sm text-gray-500">Completed</h3>
+              <div id="countCompleted" class="text-2xl font-bold">0</div>
+            </div>
+            <div class="p-4 rounded-lg border">
+              <h3 class="text-sm text-gray-500">Pending</h3>
+              <div id="countPending" class="text-2xl font-bold">0</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- My Tasks -->
+        <section id="mytasks" class="panel bg-white p-6 rounded-lg shadow-sm hidden">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold">My Tasks</h2>
+            <div class="text-sm text-gray-500">Tasks you created (live)</div>
+          </div>
+          <div id="myTasksList" class="space-y-3 max-h-[60vh] overflow-auto"></div>
+        </section>
+
+        <!-- Add Task -->
+        <section id="add" class="panel bg-white p-6 rounded-lg shadow-sm hidden">
+          <h2 class="text-lg font-semibold mb-4">Add / Edit Task</h2>
+          <form id="taskForm" class="space-y-3">
+            <input id="taskId" type="hidden" />
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <input id="taskDate" type="date" class="px-3 py-2 border rounded" required />
+              <input id="taskTime" type="time" class="px-3 py-2 border rounded" required />
+              <select id="taskType" class="px-3 py-2 border rounded">
+                <option>SEO</option>
+                <option>ORM</option>
+                <option>BLOG</option>
+                <option>Social Media Management</option>
+                <option>Ads</option>
+                <option>Other</option>
+              </select>
+            </div>
+            <textarea id="taskDesc" rows="4" placeholder="Describe the work done" class="w-full px-3 py-2 border rounded" required></textarea>
+            <div class="flex gap-2 items-center">
+              <label class="text-sm">Status:</label>
+              <select id="taskStatus" class="px-3 py-2 border rounded">
+                <option value="pending">Pending ⏳</option>
+                <option value="partial">Partially Completed 🛠️</option>
+                <option value="completed">Completed ✅</option>
+              </select>
+              <button id="saveTask" class="ml-auto bg-primary text-white px-4 py-2 rounded">Save Task</button>
+            </div>
+          </form>
+        </section>
+
+        <!-- Users (admin) -->
+        <section id="users" class="panel bg-white p-6 rounded-lg shadow-sm hidden">
+          <h2 class="text-lg font-semibold mb-4">Users</h2>
+          <div id="usersList" class="space-y-3 max-h-[60vh] overflow-auto"></div>
+        </section>
+
+        <!-- All Tasks (admin) -->
+        <section id="alltasks" class="panel bg-white p-6 rounded-lg shadow-sm hidden">
+          <h2 class="text-lg font-semibold mb-4">All Tasks (Admin)</h2>
+          <div id="allTasksList" class="space-y-3 max-h-[60vh] overflow-auto"></div>
+        </section>
+
+      </main>
+    </div>
+
+    <footer class="mt-8 text-center text-xs text-gray-500">Developed by Dharun Kumar (SEO & ORM Analyst - Lotus Hyundai)</footer>
+  </div>
+
+  <script>
+    /*****************
+     * CONFIGURATION
+     *****************/
+    // TODO: Replace with your project's firebase config
+    const firebaseConfig = {
+      apiKey: "AIzaSyDPvtjNc9nEN0bLRw5D7D77xk-x3-eIfOo",
+      authDomain: "lh-worklogapp-40192.firebaseapp.com",
+      projectId: "lh-worklogapp-40192",
+      storageBucket: "lh-worklogapp-40192.firebasestorage.app",
+      messagingSenderId: "14993024669",
+      appId: "1:14993024669:web:732bdae897e577dd279674"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    /*****************
+     * UI helpers
+     *****************/
+    const tabs = document.querySelectorAll('.tab-btn');
+    const panels = document.querySelectorAll('.panel');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const userEmail = document.getElementById('userEmail');
+    const usersNav = document.getElementById('usersNav');
+    const allTasksNav = document.getElementById('allTasksNav');
+
+    function showTab(name){
+      panels.forEach(p=>p.classList.add('hidden'));
+      document.getElementById(name).classList.remove('hidden');
+    }
+    // default
+    showTab('dashboard');
+    tabs.forEach(t=>t.addEventListener('click',()=>showTab(t.dataset.tab)));
+
+    /*****************
+     * AUTH flows
+     *****************/
+    document.getElementById('signup').addEventListener('click', async ()=>{
+      const email = document.getElementById('email').value.trim();
+      const pw = document.getElementById('password').value.trim();
+      if(!email || !pw) return alert('Provide email + password');
+      try{
+        const userCred = await auth.createUserWithEmailAndPassword(email,pw);
+        // create user doc
+        await db.collection('users').doc(userCred.user.uid).set({
+          email, createdAt: firebase.firestore.FieldValue.serverTimestamp(), isAdmin:false
+        });
+        alert('Sign up successful — Logged in');
+      }catch(err){ alert(err.message) }
+    });
+
+    document.getElementById('login').addEventListener('click', async ()=>{
+      const email = document.getElementById('email').value.trim();
+      const pw = document.getElementById('password').value.trim();
+      if(!email || !pw) return alert('Provide email + password');
+      try{ await auth.signInWithEmailAndPassword(email,pw); } catch(err){ alert(err.message) }
+    });
+
+    logoutBtn.addEventListener('click', ()=>auth.signOut());
+
+    let currentUser = null;
+    let currentUserDoc = null;
+
+    auth.onAuthStateChanged(async user=>{
+      currentUser = user;
+      if(user){
+        logoutBtn.classList.remove('hidden');
+        document.getElementById('authArea').classList.add('hidden');
+        userEmail.textContent = user.email;
+        // fetch user doc
+        const doc = await db.collection('users').doc(user.uid).get();
+        currentUserDoc = doc.exists ? doc.data() : {isAdmin:false};
+        if(currentUserDoc.isAdmin){
+          usersNav.classList.remove('hidden');
+          allTasksNav.classList.remove('hidden');
+        } else {
+          usersNav.classList.add('hidden');
+          allTasksNav.classList.add('hidden');
+        }
+        startListeners();
+      } else {
+        logoutBtn.classList.add('hidden');
+        document.getElementById('authArea').classList.remove('hidden');
+        userEmail.textContent = '';
+        currentUserDoc = null;
+        detachListeners();
+      }
+    });
+
+    /*****************
+     * TASK CRUD
+     *****************/
+    const taskForm = document.getElementById('taskForm');
+    taskForm.addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      if(!currentUser) return alert('Login first');
+      const id = document.getElementById('taskId').value || null;
+      const data = {
+        date: document.getElementById('taskDate').value,
+        time: document.getElementById('taskTime').value,
+        type: document.getElementById('taskType').value,
+        description: document.getElementById('taskDesc').value,
+        status: document.getElementById('taskStatus').value,
+        userId: currentUser.uid,
+        userEmail: currentUser.email,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      };
+      try{
+        if(id){
+          await db.collection('tasks').doc(id).update(data);
+          alert('Task updated');
+        } else {
+          data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+          await db.collection('tasks').add(data);
+          alert('Task saved');
+        }
+        taskForm.reset();
+        showTab('mytasks');
+      }catch(err){ alert(err.message) }
+    });
+
+    // helpers to render tasks
+    function statusBadge(status){
+      if(status==='completed') return '<span class="inline-block px-2 py-1 text-xs bg-green-100 text-green-800 rounded">✅ Completed</span>';
+      if(status==='partial') return '<span class="inline-block px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded">🛠️ Partial</span>';
+      return '<span class="inline-block px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded">⏳ Pending</span>';
+    }
+
+    function renderTaskCard(doc){
+      const data = doc.data ? doc.data() : doc; // accept both
+      const id = doc.id || data.id;
+      const isOwner = currentUser && data.userId === currentUser.uid;
+      return `
+        <div class="p-4 rounded-lg border bg-white">
+          <div class="flex justify-between items-start">
+            <div>
+              <div class="text-sm text-gray-500">${data.date || '-'} • ${data.time || '-'}</div>
+              <div class="font-medium">${data.type || '—'}</div>
+            </div>
+            <div class="text-right">
+              ${statusBadge(data.status)}
+              <div class="text-xs text-gray-500 mt-1">By ${data.userEmail || '—'}</div>
+            </div>
+          </div>
+          <p class="mt-3 text-sm text-gray-700">${(data.description||'').slice(0,300)}</p>
+          <div class="mt-3 flex gap-2">
+            ${isOwner?`<button data-id="${id}" class="editBtn px-3 py-1 border rounded text-sm">Edit</button>`:''}
+            ${isOwner?`<button data-id="${id}" class="delBtn px-3 py-1 border rounded text-sm">Delete</button>`:''}
+            ${currentUserDoc && currentUserDoc.isAdmin?`<button data-id="${id}" class="adminViewBtn px-3 py-1 border rounded text-sm">Admin View</button>`:''}
+          </div>
+        </div>
+      `;
+    }
+
+    // Attach listeners
+    let myTasksUnsub = null;
+    let allTasksUnsub = null;
+    let usersUnsub = null;
+
+    function startListeners(){
+      if(!currentUser) return;
+      // My tasks
+      myTasksUnsub = db.collection('tasks').where('userId','==',currentUser.uid).orderBy('createdAt','desc')
+        .onSnapshot(snap=>{
+          const container = document.getElementById('myTasksList');
+          container.innerHTML = '';
+          let completed = 0, pending=0, total=0;
+          snap.forEach(doc=>{
+            total++;
+            const d = doc.data(); if(d.status==='completed') completed++; if(d.status==='pending') pending++;
+            const el = document.createElement('div'); el.innerHTML = renderTaskCard(doc);
+            container.appendChild(el.firstElementChild);
+          });
+          document.getElementById('countMyTasks').textContent = total;
+          document.getElementById('countCompleted').textContent = completed;
+          document.getElementById('countPending').textContent = pending;
+          attachTaskButtons();
+        });
+
+      // All tasks (for admin view)
+      allTasksUnsub = db.collection('tasks').orderBy('createdAt','desc')
+        .onSnapshot(snap=>{
+          const container = document.getElementById('allTasksList');
+          if(!container) return; container.innerHTML = '';
+          snap.forEach(doc=>{ const el = document.createElement('div'); el.innerHTML = renderTaskCard(doc); container.appendChild(el.firstElementChild); });
+          attachTaskButtons();
+        });
+
+      // Users list
+      usersUnsub = db.collection('users').orderBy('createdAt','desc').onSnapshot(snap=>{
+        const container = document.getElementById('usersList'); if(!container) return; container.innerHTML='';
+        snap.forEach(doc=>{
+          const d = doc.data();
+          const div = document.createElement('div');
+          div.className = 'p-3 border rounded flex items-center justify-between';
+          div.innerHTML = `<div><div class="font-medium">${d.email || '—'}</div><div class="text-xs text-gray-500">Admin: ${d.isAdmin? 'Yes' : 'No'}</div></div>
+            <div class="flex gap-2">
+              <button data-uid="${doc.id}" class="promoteBtn px-3 py-1 border rounded text-sm">${d.isAdmin? 'Revoke' : 'Make Admin'}</button>
+            </div>`;
+          container.appendChild(div);
+        });
+        attachUserButtons();
+      });
+    }
+
+    function detachListeners(){
+      if(myTasksUnsub) myTasksUnsub();
+      if(allTasksUnsub) allTasksUnsub();
+      if(usersUnsub) usersUnsub();
+      document.getElementById('myTasksList').innerHTML='';
+      document.getElementById('allTasksList').innerHTML='';
+      document.getElementById('usersList').innerHTML='';
+    }
+
+    function attachTaskButtons(){
+      document.querySelectorAll('.editBtn').forEach(b=>b.onclick=async ()=>{
+        const id = b.dataset.id;
+        const doc = await db.collection('tasks').doc(id).get();
+        const data = doc.data();
+        document.getElementById('taskId').value = id;
+        document.getElementById('taskDate').value = data.date || '';
+        document.getElementById('taskTime').value = data.time || '';
+        document.getElementById('taskType').value = data.type || '';
+        document.getElementById('taskDesc').value = data.description || '';
+        document.getElementById('taskStatus').value = data.status || 'pending';
+        showTab('add');
+      });
+      document.querySelectorAll('.delBtn').forEach(b=>b.onclick=async ()=>{
+        if(!confirm('Delete this task?')) return;
+        await db.collection('tasks').doc(b.dataset.id).delete();
+        alert('Deleted');
+      });
+      document.querySelectorAll('.adminViewBtn').forEach(b=>b.onclick=async ()=>{
+        const id = b.dataset.id; const doc = await db.collection('tasks').doc(id).get();
+        alert(JSON.stringify(doc.data(),null,2));
+      });
+    }
+
+    function attachUserButtons(){
+      document.querySelectorAll('.promoteBtn').forEach(b=>b.onclick=async ()=>{
+        const uid = b.dataset.uid;
+        const doc = await db.collection('users').doc(uid).get();
+        const current = doc.data();
+        const newVal = !current.isAdmin;
+        await db.collection('users').doc(uid).update({isAdmin:newVal});
+        alert('Updated admin status');
+      });
+    }
+
+    /*****************
+     * Admin helper: create admin account (via UI)
+     *****************/
+    // simple prompt-based creation: only visible if user is admin
+    function showAdminCreatePrompt(){
+      if(!currentUserDoc || !currentUserDoc.isAdmin) return;
+      const email = prompt('New admin email (will still need to sign up with password):');
+      if(!email) return;
+      // Find user doc by email and set isAdmin true
+      db.collection('users').where('email','==',email).get().then(snap=>{
+        if(snap.empty) return alert('No user found with that email — they must sign up first');
+        snap.forEach(doc=>doc.ref.update({isAdmin:true}));
+        alert('Promoted');
+      });
+    }
+
+    // small keyboard shortcut: Ctrl+M to open admin invite
+    window.addEventListener('keydown',(e)=>{ if(e.ctrlKey && e.key==='m'){ showAdminCreatePrompt(); } });
+
+    /*****************
+     * NOTES & SAFETY
+     *****************/
+    // - Replace firebaseConfig with your project values (from Firebase console)
+    // - Enable Authentication -> Email/Password and Firestore in your project
+    // - Firestore rules (dev): allow read/write if request.auth != null. For production tighten rules.
+
+  </script>
+</body>
+</html>
