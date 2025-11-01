@@ -318,7 +318,7 @@
     function startListeners(){
       if(!currentUser) return;
       // My tasks
-      myTasksUnsub = db.collection('tasks').where('userId','==',currentUser.uid).orderBy('createdAt','desc')
+      myTasksUnsub = db.collection('tasks').where('userId','==',currentUser.uid)
         .onSnapshot(snap=>{
           const container = document.getElementById('myTasksList');
           container.innerHTML = '';
@@ -434,3 +434,4 @@
   </script>
 </body>
 </html>
+
